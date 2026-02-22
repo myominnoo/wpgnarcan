@@ -1,0 +1,168 @@
+options(scipen = 999)
+
+
+library(readr)
+
+# install.packages("devtools")
+# devtools::install_github("Chicago/RSocrata", ref="dev")
+
+## geojson for maps
+neighbourhoods <- sf::st_read("Neighbourhoods_20260222.geojson")
+
+library(RSocrata)
+url <- "https://data.winnipeg.ca/resource/{id}.csv?$limit={limit}"
+data_limit <- "100000"
+id_naloxone <- "qd6b-q49i"
+id_substance <- "6x82-bz5y"
+url_naloxone <- glue::glue(url, id = id_naloxone, limit = data_limit)
+url_substance <- glue::glue(url, id = id_substance, limit = data_limit)
+
+df_naloxone <- RSocrata::read.socrata(url_naloxone)
+df_substance <- RSocrata::read.socrata(url_substance) |> 
+    dplyr::mutate(id = paste0(incident_number, "##", patient_number)) |> 
+    dplyr::select(id, substance)
+
+
+df_wfps_call_logs <- RSocrata::read.socrata(
+    "https://data.winnipeg.ca/api/odata/v4/yg42-q284?$limit=2000"
+)
+
+
+
+glimpse(df_naloxone)
+glimpse(df_substance)
+
+
+
+df_su <- 
+    dplyr::inner_join(
+        df_naloxone, 
+        df_substance, 
+        by = "id"
+    )
+
+
+ggplot(neighbourhoods) +
+    geom_sf() +
+    theme_minimal()
+
+
+glimpse(df_su)
+
+
+
+
+library(sf)
+library(tidyverse)
+library(leaflet)
+
+naloxone_by_neighbourhood <- df_su |>
+    group_by(neighbourhood, substance) |>
+    summarise(incidents = n(), .groups = "drop")
+
+# join
+naloxone_map <- neighbourhoods |>
+    left_join(naloxone_by_neighbourhood, by = c("name" = "neighbourhood"))
+
+parks <- sf::st_read("Parks_and_Open_Space_20260222.geojson") |>
+    st_transform(4326) |>
+    mutate(total_area_in_hectares = as.numeric(total_area_in_hectares))
+
+poverty <- sf::st_read("Higher_Poverty_Areas_20260222.geojson") |> 
+    dplyr::mutate(
+        high_poverty_status = case_when(
+            high_poverty_status == "High Poverty Neighbourhood" ~ "High Poverty", 
+            TRUE ~ high_poverty_status
+        )
+    )
+
+glimpse(poverty)
+table(poverty$high_poverty_status)
+
+
+
+# colour palette
+pal <- colorNumeric(palette = "YlOrRd", domain = naloxone_map$incidents, na.color = "grey90")
+
+
+# Create poverty palette
+
+# Naloxone palette - blues
+pal <- colorNumeric(
+    palette = "Blues",
+    domain = naloxone_map$incidents
+)
+
+# Poverty palette - reds/oranges, distinct from blues
+poverty_pal <- colorFactor(
+    palette = c("#fee5d9", "#a50f15", "#67000d"),
+    levels = c("Not High Poverty", "High Poverty", "Concentrated"),
+    domain = poverty$high_poverty_status,
+    na.color = "transparent"
+)
+
+
+
+leaflet() |>
+    addTiles(group = "OpenStreetMap") |>
+    # poverty layer
+    addPolygons(
+        data = poverty,
+        group = "Poverty Areas",
+        fillColor = ~poverty_pal(high_poverty_status),
+        fillOpacity = 0.5,
+        color = "black",
+        weight = 1,
+        label = ~paste0(
+            ifelse(is.na(neighbourhood_name), "Unnamed", neighbourhood_name), 
+            " Þ ", 
+            ifelse(is.na(high_poverty_status), "No data", high_poverty_status),
+            " | Pop: ", population_total
+        ),
+        highlightOptions = highlightOptions(weight = 3, color = "#666", bringToFront = TRUE)
+    ) |>
+    # naloxone choropleth layer
+    addPolygons(
+        data = naloxone_map,
+        group = "Naloxone Incidents",
+        fillColor = ~pal(incidents),
+        fillOpacity = 0.5,
+        color = "black",
+        weight = 1,
+        label = ~paste0(name, ": ", incidents, " incidents"),
+        highlightOptions = highlightOptions(weight = 3, color = "#666", bringToFront = TRUE)
+    ) |>
+    # parks layer
+    addPolygons(
+        data = parks,
+        group = "Parks and Open Space",
+        fillColor = "darkgreen",
+        fillOpacity = 0.5,
+        color = "green",
+        weight = 1,
+        label = ~paste0(park_name, " (", classification_type, ", ", round(total_area_in_hectares, 1), " ha)"),
+        highlightOptions = highlightOptions(weight = 3, color = "#333", bringToFront = TRUE)
+    ) |>
+    addLegend(
+        pal = pal,
+        values = naloxone_map$incidents,
+        title = "Naloxone Incidents",
+        position = "bottomright"
+    ) |>
+    addLegend(
+        pal = poverty_pal,
+        values = poverty$high_poverty_status,
+        title = "Poverty Status",
+        position = "bottomleft",
+        na.label = "No data"
+    ) |>
+    addLayersControl(
+        baseGroups = "OpenStreetMap",
+        overlayGroups = c("Poverty Areas", "Naloxone Incidents", "Parks and Open Space"),
+        options = layersControlOptions(collapsed = FALSE)
+    ) |> 
+    addLayersControl(
+        baseGroups = c("Naloxone Incidents", "Poverty Areas"),
+        overlayGroups = "Parks and Open Space",
+        options = layersControlOptions(collapsed = FALSE)
+    )
