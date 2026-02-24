@@ -40,13 +40,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# installing R packages
+RUN mkdir packages 
+COPY install_packages.R packages/
+COPY packages.json packages/
+RUN Rscript packages/install_packages.R
 
 # Installing Quarto
 COPY install_quarto.sh packages/
 RUN  bash packages/install_quarto.sh $QUARTO_VERSION
 
-
 # Install additional R packages
-RUN Rscript -e "install.packages(c('dplyr'), repos = 'http://cran.rstudio.com/')"
+RUN Rscript -e "remotes::install_github('Chicago/RSocrata')"
 
 EXPOSE 8787

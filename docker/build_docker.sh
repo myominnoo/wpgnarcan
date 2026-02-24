@@ -2,7 +2,7 @@
 echo "Build the docker"
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t myominnoo/wpgod:dev.0.0.0.9000 \
+  -t myominnoo/wpgnarcan:dev.0.0.0.9000 \
   --push \
   .
   
