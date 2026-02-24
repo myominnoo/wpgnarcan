@@ -1,0 +1,9 @@
+services:
+  rstudio:
+    image: "$DOCKER_IMAGE" 
+    ports:
+      - "8787:8787"
+    volumes:
+      - type: "bind"
+        source: "$MOUNT_DIR"
+        target: "/home/rstudio"
